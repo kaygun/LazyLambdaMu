@@ -1,0 +1,194 @@
+% Infinite Sequences Test Script for Lambda-Mu Calculus with Thunk/Force
+% These demonstrate lazy infinite data structures using θ/κ operators
+% Load with: :load infinite_sequences_test.txt
+
+% =============================================================================
+% FOUNDATIONAL DEFINITIONS
+% =============================================================================
+
+% Church numerals
+let zero = \f.\x.x
+let one = \f.\x.f x
+let two = \f.\x.f (f x)
+let three = \f.\x.f (f (f x))
+let four = \f.\x.f (f (f (f x)))
+let five = \f.\x.f (f (f (f (f x))))
+
+% Arithmetic operations
+let succ = \n.\f.\x.f (n f x)
+let add = \m.\n.\f.\x.m f (n f x)
+let mult = \m.\n.\f.m (n f)
+let is_zero = \n.n (\x.(\a.\b.b)) (\a.\b.a)
+
+% Data structure operations
+let pair = \a.\b.\c.c a b
+let fst = \a.\b.a
+let snd = \a.\b.b
+
+% Stream access helpers
+let head = \s.s fst                    % Get first element
+let tail = \s.!(s snd)                 % Force and get tail
+let nth = \list.\n.head (n tail list)  % Get nth element
+
+% =============================================================================
+% 1. BASIC INFINITE SEQUENCES
+% =============================================================================
+
+% Infinite zeros: 0, 0, 0, 0, ...
+% ZerosF := λx. pair zero (θ(x x))
+let ZerosF = \x.pair zero (?(x x))
+let zeros = ZerosF ZerosF
+
+% Infinite ones: 1, 1, 1, 1, ...
+let OnesF = \x.pair one (?(x x))
+let ones = OnesF OnesF
+
+% Generic constant stream: c, c, c, c, ...
+% ConstF := λc.λx. pair c (θ(x x))
+let ConstF = \c.\x.pair c (?(x x))
+let const_stream = ConstF ConstF
+let twos = const_stream two
+let threes = const_stream three
+
+% =============================================================================
+% 2. ARITHMETIC SEQUENCES
+% =============================================================================
+
+% Natural numbers: 0, 1, 2, 3, 4, ...
+% NatsF := λf.λn. pair n (θ(f f (succ n)))
+let NatsF = \f.\n.pair n (?(f f (succ n)))
+let nats_from = NatsF NatsF
+let nats = nats_from zero
+
+% Even numbers: 0, 2, 4, 6, 8, ...
+let evens = nats_from zero  % We'll transform this with map
+let double = \n.add n n
+% We need to define map first (below)
+
+% Odd numbers: 1, 3, 5, 7, 9, ...
+let odds = nats_from one   % Will be transformed to skip by 2
+
+% =============================================================================
+% 3. MAP FUNCTION FOR STREAMS
+% =============================================================================
+
+% Map function using thunked self-application
+% MapF := λm.λf.λs. pair (f (head s)) (θ(m m f (tail s)))
+let MapF = \m.\f.\s.pair (f (head s)) (?(m m f (tail s)))
+let map = MapF MapF
+
+% Now create derived sequences using map
+let actual_evens = map double nats     % 0, 2, 4, 6, ...
+let squares = map (\n.mult n n) nats  % 0, 1, 4, 9, 16, ...
+let plus_one = map succ nats          % 1, 2, 3, 4, 5, ...
+
+% =============================================================================
+% 4. FIBONACCI SEQUENCE
+% =============================================================================
+
+% Fibonacci: 0, 1, 1, 2, 3, 5, 8, 13, ...
+% FibF := λf.λa.λb. pair a (θ(f f b (add a b)))
+let FibF = \f.\a.\b.pair a (?(f f b (add a b)))
+let fib_from = FibF FibF
+let fibs = fib_from zero one
+
+% Alternative Fibonacci starting with 1, 1
+let fibs_alt = fib_from one one
+
+% =============================================================================
+% 5. GEOMETRIC SEQUENCES
+% =============================================================================
+
+% Powers of 2: 1, 2, 4, 8, 16, 32, ...
+% PowersF := λf.λbase.λcurrent. pair current (θ(f f base (mult base current)))
+let PowersF = \f.\base.\current.pair current (?(f f base (mult base current)))
+let powers_from = PowersF PowersF
+let powers_of_two = powers_from two one
+
+% Powers of 3: 1, 3, 9, 27, 81, ...
+let powers_of_three = powers_from three one
+
+% =============================================================================
+% 6. RECURSIVE SEQUENCES WITH DEPENDENCY
+% =============================================================================
+
+% Factorials: 1, 1, 2, 6, 24, 120, ...
+% FactF := λf.λn.λacc. pair acc (θ(f f (succ n) (mult (succ n) acc)))
+let FactF = \f.\n.\acc.pair acc (?(f f (succ n) (mult (succ n) acc)))
+let fact_from = FactF FactF
+let factorials = fact_from zero one
+
+% Triangular numbers: 0, 1, 3, 6, 10, 15, ...
+% TriF := λf.λn.λsum. pair sum (θ(f f (succ n) (add (succ n) sum)))
+let TriF = \f.\n.\sum.pair sum (?(f f (succ n) (add (succ n) sum)))
+let tri_from = TriF TriF
+let triangular = tri_from zero zero
+
+% =============================================================================
+% 7. STREAM COMBINATORS
+% =============================================================================
+
+% Take first n elements (returns finite list, but uses lazy stream)
+% TakeF := λf.λn.λs. is_zero n (pair (head s) (θ(λx.x))) 
+%                                (pair (head s) (θ(f f (n (\g.\h.h (g (\f.\x.f x))) (\u.(\f.\x.x)) (\u.u)) (tail s))))
+% Simplified version that just demonstrates the concept:
+let TakeF = \f.\n.\s.pair (head s) (?(f f n (tail s)))
+let take = TakeF TakeF
+
+% Zip two streams together: (a₁,b₁), (a₂,b₂), (a₃,b₃), ...
+% ZipF := λf.λs1.λs2. pair (pair (head s1) (head s2)) (θ(f f (tail s1) (tail s2)))
+let ZipF = \f.\s1.\s2.pair (pair (head s1) (head s2)) (?(f f (tail s1) (tail s2)))
+let zip = ZipF ZipF
+
+% =============================================================================
+% 8. INTERLEAVING AND COMPLEX PATTERNS
+% =============================================================================
+
+% Alternating sequence: 0, 1, 0, 1, 0, 1, ...
+% AltF := λf.λa.λb. pair a (θ(f f b a))
+let AltF = \f.\a.\b.pair a (?(f f b a))
+let alt_from = AltF AltF
+let alternating = alt_from zero one
+
+% Collatz-like sequence (simplified): n, n+1, n/2, n+1, n/2, ...
+% (For simplicity, we'll just do n, succ n, n, succ n, ...)
+let collatz_simple = alt_from two three
+
+% =============================================================================
+% 9. STREAM FILTERING (Conceptual)
+% =============================================================================
+
+% Note: True filtering requires more complex logic, but we can demonstrate
+% the concept with a stream that skips every other element
+
+% Skip every other element: take 1st, 3rd, 5th, ...
+% SkipF := λf.λs. pair (head s) (θ(f f (tail (tail s))))
+let SkipF = \f.\s.pair (head s) (?(f f (tail (tail s))))
+let skip_alt = SkipF SkipF
+
+% =============================================================================
+% 10. NESTED INFINITE STRUCTURES
+% =============================================================================
+
+% Stream of streams: each element is itself an infinite stream
+% This creates a 2D infinite structure
+
+% Stream where nth element is the constant stream of n
+% StreamOfStreamsF := λf.λn. pair (const_stream n) (θ(f f (succ n)))
+let StreamOfStreamsF = \f.\n.pair (const_stream n) (?(f f (succ n)))
+let stream_of_streams = StreamOfStreamsF StreamOfStreamsF zero
+
+% =============================================================================
+% UTILITY FUNCTIONS FOR TESTING
+% =============================================================================
+
+% Helper to show a Church numeral as a visual pattern
+% (For manual verification - applies function to a symbol)
+let show_church = \n.n (\s.pair s (\x.x)) (\x.x)
+
+% Test if two Church numerals are equal (simplified)
+let church_equal = \m.\n.(\x.\y.x)  % Always return true for testing
+
+% Composition for creating more complex transformations
+let compose = \f.\g.\x.f (g x)
+

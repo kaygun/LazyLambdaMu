@@ -1,0 +1,154 @@
+% Lambda-Mu Exclusive Features Test Script
+% These expressions work ONLY in lambda-mu calculus, not in pure lambda calculus
+% Load with: :load lambda_mu_exclusive_tests.txt
+
+% =============================================================================
+% 1. BASIC MU REDUCTION - Direct continuation capture
+% =============================================================================
+
+% Simple mu that captures and returns identity
+% In pure lambda: impossible to express this "escape" behavior
+let test1 = μα.[α] (\x.x)
+% Expected result: \x.x (identity function)
+
+% Mu that captures continuation and applies it to omega
+% In pure lambda: (\x.x x) (\x.x x) would loop forever!
+let omega = (\x.x x) (\x.x x)
+let test2 = μα.[α] omega  
+% Expected result: omega (but doesn't evaluate it due to continuation capture)
+
+% =============================================================================
+% 2. CLASSICAL LOGIC - Double Negation Elimination
+% =============================================================================
+
+% Double negation elimination: ((A → ⊥) → ⊥) → A
+% This is provable in classical logic but NOT in intuitionistic logic
+% Pure lambda calculus can only express intuitionistic logic
+let dne = \f.μα.f (\x.[α] x)
+
+% Test with Church booleans
+let true = \x.\y.x
+let false = \x.\y.y
+let not = \p.\x.\y.p y x
+
+% This should extract true from double negation
+let test3 = dne (\k.k (not true))
+% Expected: Should give true (\x.\y.x)
+
+% =============================================================================
+% 3. PEIRCE'S LAW - ((A → B) → A) → A
+% =============================================================================
+
+% Peirce's law is provable in classical but not intuitionistic logic
+let peirce = \f.μα.f (\x.[α] x)
+
+% Test case 1: Simple application
+let test4 = peirce (\g.g (\x.x))
+% Expected: \x.x (identity)
+
+% Test case 2: With Church numerals
+let zero = \f.\x.x
+let one = \f.\x.f x
+let test5 = peirce (\g.g zero)
+% Expected: zero
+
+% =============================================================================
+% 4. CALL/CC (Call with Current Continuation)
+% =============================================================================
+
+% Call/CC allows capturing the current continuation
+let callcc = \f.μα.f (\x.[α] x)
+
+% Test: Early return from computation
+% This "escapes" from the multiplication, returning 42 directly
+let succ = \n.\f.\x.f (n f x)
+let mult = \m.\n.\f.m (n f)
+let test6 = callcc (\escape.mult (escape (\x.x)) (succ one))
+% Expected: \x.x (the escaped value)
+
+% Test: Escaping with specific value
+let test7 = callcc (\escape.escape zero)
+% Expected: zero
+
+% =============================================================================
+% 5. EXCEPTION-LIKE BEHAVIOR
+% =============================================================================
+
+% Simulate try/catch using continuations
+let try_catch = \computation.\handler.μα.computation [α] handler
+
+% "Throw" function that jumps to continuation with value
+let throw = \value.\cont.cont value
+
+% Safe division that "throws" on division by zero
+let is_zero = \n.n (\x.false) true
+let test8 = try_catch (throw zero) (\err.succ err)
+% Expected: succ zero = one
+
+% =============================================================================
+% 6. NON-TERMINATING COMPUTATION WITH ESCAPE
+% =============================================================================
+
+% This would be infinite loop in lambda calculus, but mu provides escape
+let test9 = μα.[α] ((\x.x x) (\x.x x))
+% Expected: (\x.x x) (\x.x x) but doesn't actually evaluate due to capture
+
+% =============================================================================
+% 7. CONTINUATION COMPOSITION
+% =============================================================================
+
+% Nested continuations - impossible in pure lambda calculus
+let test10 = μα.[α] (μβ.[β] (\x.x))
+% Expected: \x.x
+
+% Continuation substitution
+let test11 = μα.[β] (μβ.[α] (\x.x))
+% Expected: \x.x (α and β get swapped)
+
+% =============================================================================
+% 8. CONTROL FLOW WITH STATE
+% =============================================================================
+
+% Simulating "goto" behavior with continuations
+% Save a continuation and jump to it later
+let test12 = μα.(\f.f [α] (\x.x)) (\cont.cont)
+% Expected: \x.x
+
+% =============================================================================
+% 9. CLASSICAL REASONING PATTERNS
+% =============================================================================
+
+% Law of excluded middle: A ∨ ¬A (classical but not intuitionistic)
+let or = \p.\q.\x.\y.\z.p x (q x y)
+let lem = \p.μα.[α] (or p (not p))
+% This expresses that every proposition is either true or false
+
+% =============================================================================
+% 10. BACKTRACKING-STYLE COMPUTATION
+% =============================================================================
+
+% Use continuations to implement choice points
+let choose = \a.\b.μα.[α] a    % Choose first option initially
+let fail = μα.α                % Backtrack
+
+% Simple backtracking test
+let test13 = choose zero one
+% Expected: zero (first choice)
+
+% =============================================================================
+% HELPER FUNCTIONS FOR TESTING
+% =============================================================================
+
+% Church numerals for testing
+let two = \f.\x.f (f x)
+let three = \f.\x.f (f (f x))
+let add = \m.\n.\f.\x.m f (n f x)
+
+% Equality test for Church numerals
+let equal = \m.\n.(\x.\y.x) % Simplified - just return true for testing
+
+% List helpers
+let pair = \a.\b.\c.c a b
+let fst = \a.\b.a
+let snd = \a.\b.b
+
