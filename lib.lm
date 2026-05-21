@@ -1,42 +1,41 @@
-% Test Script for Lazy Church Naturals
-% Load with: :load church_naturals_test.txt
+% Standard library for lazy λμ-calculus
+% Load with: :load lib.lm
 
-% Basic Church numerals and operations
-let zero = \f.\x.x                    % Church numeral 0
-let succ = \n.\f.\x.f (n f x)         % Successor function
-let one = succ zero                   % Church numeral 1  
-let two = succ one                    % Church numeral 2
-let three = succ two                  % Church numeral 3
-let pred = \n.\f.\x.n (\g.\h.h (g f)) (\u.x) (\u.u)  % Predecessor
+% Church numerals
+let zero  = \f.\x.x
+let succ  = \n.\f.\x.f (n f x)
+let pred  = \n.\f.\x.n (\g.\h.h (g f)) (\u.x) (\u.u)
+let one   = succ zero
+let two   = succ one
+let three = succ two
 
-% Basic list operations
-let pair = \a.\b.\c.c a b             % Pair constructor
-let fst = \a.\b.a                     % First projection
-let snd = \a.\b.b                     % Second projection
+% Arithmetic
+let is_zero = \n.n (\x.(\a.\b.b)) (\a.\b.a)
+let add     = \m.\n.\f.\x.m f (n f x)
+let mul     = \m.\n.\f.m (n f)
 
-% Map function using thunked self-application
-% MapF := λm.λf.λs.pair (f (s fst)) (θ(m m f (!(s snd))))
-let MapF = \m.\f.\s.pair (f (s fst)) (?(m m f (!(s snd))))
-let map = MapF MapF                   % Fixed-point gives us map
+% Pairs
+let pair = \a.\b.\c.c a b
+let fst  = \a.\b.a
+let snd  = \a.\b.b
 
-% Method 1: Natural numbers using enumeration from zero
-% EnumF := λf.λn.pair n (θ(f f (succ n)))
-let EnumF = \f.\n.pair n (?(f f (succ n)))
-let enum_from = EnumF EnumF           % Creates streams starting from any number
-let nats = enum_from zero             % Natural numbers: 0, 1, 2, 3, ...
+% Lazy stream access
+let head = \s.s fst
+let tail = \s.!(s snd)
+let nth  = \s.\n.head (n tail s)
 
-% Method 2: Alternative using stream generator pattern  
-% StreamF := λf.λstart.pair start (θ(f f (succ start)))
-let StreamF = \f.\start.pair start (?(f f (succ start)))
-let stream_from = StreamF StreamF
-let naturals = stream_from zero       % Same as nats, different implementation
+% Stream combinators
+let MapF    = \m.\f.\s.pair (f (head s)) (?(m m f (tail s)))
+let map     = MapF MapF
+let ZipF    = \f.\s1.\s2.pair (pair (head s1) (head s2)) (?(f f (tail s1) (tail s2)))
+let zip     = ZipF ZipF
+let FilterF = \f.\p.\s.(p (head s)) (pair (head s) (?(f f p (tail s)))) (f f p (tail s))
+let filter  = FilterF FilterF
+let nil     = \c.\n.n
+let TakeF   = \f.\n.\s.is_zero n nil (pair (head s) (?(f f (pred n) (tail s))))
+let take    = TakeF TakeF
 
-% Test predicates and operations
-let is_zero = \n.n (\x.(\a.\b.b)) (\a.\b.a)    % Zero predicate
-let add = \m.\n.\f.\x.m f (n f x)              % Addition
-let mul = \m.\n.\f.m (n f)                     % Multiplication
-
-% Access helpers for lazy lists
-let head = \s.s fst                   % Get first element of stream
-let tail = \s.!(s snd)                % Get tail of stream (forced)
-let nth = \list.\n.head (n tail list) % Get nth element: apply tail n times, then head
+% Natural number streams
+let EnumF     = \f.\n.pair n (?(f f (succ n)))
+let enum_from = EnumF EnumF
+let nats      = enum_from zero
