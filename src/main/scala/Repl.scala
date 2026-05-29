@@ -2,43 +2,42 @@ import scala.io.StdIn.readLine
 import scala.collection.mutable
 import java.io.{PrintWriter, File}
 import scala.io.Source
-import scala.util.{Try, Success, Failure, Using}
+import scala.util.{Try, Using}
 
 object REPL extends App:
   private val environment: mutable.Map[TermVar, Term] = mutable.Map.empty
 
-  private def withFile(filename: String, operation: String)(action: => Unit): Unit =
-    Try(action) match
-      case Success(_) => println(s"$operation successful: $filename")
-      case Failure(e) => println(s"Error during $operation of $filename: ${e.getMessage}")
+  private def withFile(filename: String, operation: String)(result: Try[Unit]): Unit =
+    result.failed.foreach(e => println(s"Error during $operation of $filename: ${e.getMessage}"))
+    if result.isSuccess then println(s"$operation successful: $filename")
 
-  private def resolve(expr: Term, bound: Set[Name] = Set.empty, depth: Int = 0): Term =
-    if depth > 100 then expr
-    else expr match
-      case Var(tv: TermVar) if !bound.contains(tv) => environment.getOrElse(tv, Var(tv))
-      case Var(_) => expr
-      case Lam(param, body) => Lam(param, resolve(body, bound + param, depth + 1))
-      case Mu(param, body)  => Mu(param, resolve(body, bound + param, depth + 1))
-      case Appl(head, arg)  => Appl(resolve(head, bound, depth + 1), resolve(arg, bound, depth + 1))
-      case Cont(head, arg)  => Cont(resolve(head, bound, depth + 1), resolve(arg, bound, depth + 1))
-      case Thunk(term)      => Thunk(resolve(term, bound, depth + 1))
-      case Force(term)      => Force(resolve(term, bound, depth + 1))
+  private def resolve(expr: Term, bound: Set[Name] = Set.empty): Term = expr match
+    case Var(tv: TermVar) if !bound.contains(tv) => environment.getOrElse(tv, Var(tv))
+    case Var(_)           => expr
+    case Lam(param, body) => Lam(param, resolve(body, bound + param))
+    case Mu(param, body)  => Mu(param, resolve(body, bound + param))
+    case Appl(head, arg)  => Appl(resolve(head, bound), resolve(arg, bound))
+    case Cont(head, arg)  => Cont(resolve(head, bound), resolve(arg, bound))
+    case Thunk(term)      => Thunk(resolve(term, bound))
+    case Force(term)      => Force(resolve(term, bound))
 
-  private def saveEnv(filename: String): Unit = withFile(filename, "Environment save") {
-    Using(new PrintWriter(File(filename))) { out =>
-      environment.foreach { case (k, v) => out.println(s"let ${k.name} = ${v.pretty}") }
-    }.get
-  }
+  private def saveEnv(filename: String): Unit =
+    withFile(filename, "Environment save") {
+      Using(new PrintWriter(File(filename))) { out =>
+        environment.foreach { case (k, v) => out.println(s"let ${k.name} = ${v.pretty}") }
+      }
+    }
 
-  private def loadEnv(filename: String): Unit = withFile(filename, "Environment load") {
-    Using(Source.fromFile(filename)) { src =>
-      for line <- src.getLines do
-        if line.trim.startsWith("let ") then
-          parseLet(line.trim.drop(4)) match
-            case Some((name, expr)) => environment(TermVar(name)) = resolve(expr)
-            case None => println(s"Invalid line: $line")
-    }.get
-  }
+  private def loadEnv(filename: String): Unit =
+    withFile(filename, "Environment load") {
+      Using(Source.fromFile(filename)) { src =>
+        for line <- src.getLines do
+          if line.trim.startsWith("let ") then
+            parseLet(line.trim.drop(4)) match
+              case Some((name, expr)) => environment(TermVar(name)) = resolve(expr)
+              case None => println(s"Invalid line: $line")
+      }
+    }
 
   private def parseLet(letContent: String): Option[(String, Term)] =
     letContent.split("=", 2).map(_.trim) match
@@ -50,10 +49,12 @@ object REPL extends App:
     val resolved = resolve(expr)
     resolved.eval().normalize()
 
+  private def parseAndResolve(exprStr: String): Either[String, Term] =
+    LambdaParser.parseExpr(exprStr).map(resolve(_))
+
   private def showStep(exprStr: String): Unit =
-    LambdaParser.parseExpr(exprStr) match
-      case Right(expr) =>
-        val resolved = resolve(expr)
+    parseAndResolve(exprStr) match
+      case Right(resolved) =>
         val stepped = resolved.step
         if stepped.alphaEq(resolved) then
           println(s"${resolved.pretty} (already in normal form)")
@@ -62,9 +63,9 @@ object REPL extends App:
       case Left(err) => println(err)
 
   private def showTrace(exprStr: String): Unit =
-    LambdaParser.parseExpr(exprStr) match
-      case Right(expr) => traceReduction(resolve(expr))
-      case Left(err)   => println(err)
+    parseAndResolve(exprStr) match
+      case Right(resolved) => traceReduction(resolved)
+      case Left(err)       => println(err)
 
   private def traceReduction(expr: Term, maxSteps: Int = 400): Unit =
     var current = expr

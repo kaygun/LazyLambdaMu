@@ -12,23 +12,23 @@ object LambdaParser extends JavaTokenParsers:
     termName ^^ Var.apply |
     "(" ~> expr <~ ")"
 
-  def continuation: Parser[Cont] =
+  def continuation: Parser[Term] =
     ("[" ~> contName <~ "]") ~ application ^^ { case c ~ a => Cont(Var(c), a) }
 
-  def thunk: Parser[Thunk] =
+  def thunk: Parser[Term] =
     ("θ" | "?") ~> primary ^^ Thunk.apply
 
-  def force: Parser[Force] =
+  def force: Parser[Term] =
     ("κ" | "!") ~> primary ^^ Force.apply
 
   def atom: Parser[Term] = continuation | thunk | force | primary
 
   def application: Parser[Term] = rep1(atom) ^^ (_.reduceLeft(Appl.apply))
 
-  def lambda: Parser[Lam] =
+  def lambda: Parser[Term] =
     ("\\" | "λ") ~> termName ~ "." ~ expr ^^ { case p ~ _ ~ b => Lam(p, b) }
 
-  def mu: Parser[Mu] =
+  def mu: Parser[Term] =
     ("#" | "μ") ~> contName ~ "." ~ expr ^^ { case p ~ _ ~ b => Mu(p, b) }
 
   def expr: Parser[Term] = lambda | mu | application
@@ -36,4 +36,5 @@ object LambdaParser extends JavaTokenParsers:
   def parseExpr(input: String): Either[String, Term] =
     parseAll(expr, input) match
       case Success(result, _) => Right(result)
-      case NoSuccess(msg, _) => Left(s"Parse error: $msg")
+      case Failure(msg, _)    => Left(s"Parse error: $msg")
+      case Error(msg, _)      => Left(s"Parse error: $msg")

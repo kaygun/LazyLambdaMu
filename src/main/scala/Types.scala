@@ -18,12 +18,17 @@ sealed trait Term:
       if count >= maxSteps then current
       else
         val next = current.step
-        if next.alphaEq(current) then current
+        if (next eq current) || next.alphaEq(current) then current
         else loop(next, count + 1)
     loop(this, 0)
 
-  def normalize(): Term = normalizeWithDepth(0)
-  def normalizeWithDepth(depth: Int): Term = this
+  protected def mapSubterms(f: Term => Term): Term = this
+  def normalize(): Term =
+    val candidate = mapSubterms(_.normalize())
+    val stepped = candidate.step
+    if !(stepped eq candidate) && !stepped.alphaEq(candidate)
+    then stepped.normalize()
+    else candidate
 
 object Term:
   private var counter = 0
@@ -31,7 +36,7 @@ object Term:
     counter += 1
     s"$prefix$counter"
 
-abstract class Binding(val param: Name, val body: Term) extends Term:
+sealed abstract class Binding(val param: Name, val body: Term) extends Term:
   def freeNames = body.freeNames - param
   override def alphaEq(that: Term, env: Map[Name, Name] = Map.empty) = that match
     case other: Binding if other.getClass == this.getClass =>
@@ -46,39 +51,26 @@ abstract class Binding(val param: Name, val body: Term) extends Term:
     reconstruct(p, prepared.subst(substMap - param))
   override def step = reduction.getOrElse {
     body.step match
-      case b if !b.alphaEq(body) => reconstruct(param, b)
+      case b if !(b eq body) && !b.alphaEq(body) => reconstruct(param, b)
       case _ => this
   }
-  override def normalizeWithDepth(depth: Int) =
-    if depth > 50 then this
-    else
-      val normBody = body.normalizeWithDepth(depth + 1)
-      val candidate = reconstruct(param, normBody)
-      val stepped = candidate.step
-      if !stepped.alphaEq(candidate) then stepped.normalizeWithDepth(depth + 1) else candidate
+  override protected def mapSubterms(f: Term => Term): Term = reconstruct(param, f(body))
 
   protected def freshParam(): Name
   protected def reconstruct(param: Name, body: Term): Binding
 
-abstract class Application(val head: Term, val arg: Term) extends Term:
+sealed abstract class Application(val head: Term, val arg: Term) extends Term:
   def freeNames = head.freeNames ++ arg.freeNames
   override def alphaEq(that: Term, env: Map[Name, Name] = Map.empty) = that match
     case other: Application if other.getClass == this.getClass =>
       head.alphaEq(other.head, env) && arg.alphaEq(other.arg, env)
     case _ => false
   def subst(substMap: Map[Name, Term]) = reconstruct(head.subst(substMap), arg.subst(substMap))
-  override def normalizeWithDepth(depth: Int) =
-    if depth > 50 then this
-    else
-      val normH = head.normalizeWithDepth(depth + 1)
-      val normA = arg.normalizeWithDepth(depth + 1)
-      val candidate = reconstruct(normH, normA)
-      val stepped = candidate.step
-      if !stepped.alphaEq(candidate) then stepped.normalizeWithDepth(depth + 1) else candidate
+  override protected def mapSubterms(f: Term => Term): Term = reconstruct(f(head), f(arg))
 
   protected def reconstruct(head: Term, arg: Term): Application
 
-abstract class Unary(val term: Term) extends Term:
+sealed abstract class Unary(val term: Term) extends Term:
   protected def symbol: String
   def prettyWithDepth(depth: Int) =
     if depth > 10 then s"$symbol(...)"
@@ -93,15 +85,9 @@ abstract class Unary(val term: Term) extends Term:
   def subst(substMap: Map[Name, Term]) = reconstruct(term.subst(substMap))
   override def step = reduction.getOrElse {
     val newTerm = term.step
-    if !newTerm.alphaEq(term) then reconstruct(newTerm) else this
+    if !(newTerm eq term) && !newTerm.alphaEq(term) then reconstruct(newTerm) else this
   }
-  override def normalizeWithDepth(depth: Int) =
-    if depth > 50 then this
-    else
-      val normTerm = term.normalizeWithDepth(depth + 1)
-      val candidate = reconstruct(normTerm)
-      val stepped = candidate.step
-      if !stepped.alphaEq(candidate) then stepped.normalizeWithDepth(depth + 1) else candidate
+  override protected def mapSubterms(f: Term => Term): Term = reconstruct(f(term))
 
   protected def reconstruct(term: Term): Unary
 
@@ -116,12 +102,16 @@ case class Var(n: Name) extends Term:
 case class Lam(override val param: TermVar, override val body: Term) extends Binding(param, body):
   def prettyWithDepth(depth: Int) = s"λ${param.name}.${body.prettyWithDepth(depth)}"
   protected def freshParam() = TermVar(Term.fresh(param.name))
-  protected def reconstruct(param: Name, body: Term) = Lam(param.asInstanceOf[TermVar], body)
+  protected def reconstruct(param: Name, body: Term) = param match
+    case tv: TermVar => Lam(tv, body)
+    case _ => throw new AssertionError(s"Lam.reconstruct: expected TermVar, got $param")
 
 case class Mu(override val param: ContVar, override val body: Term) extends Binding(param, body):
   def prettyWithDepth(depth: Int) = s"μ${param.name}.${body.prettyWithDepth(depth)}"
   protected def freshParam() = ContVar(Term.fresh(param.name))
-  protected def reconstruct(param: Name, body: Term) = Mu(param.asInstanceOf[ContVar], body)
+  protected def reconstruct(param: Name, body: Term) = param match
+    case cv: ContVar => Mu(cv, body)
+    case _ => throw new AssertionError(s"Mu.reconstruct: expected ContVar, got $param")
   override def reduction = body match
     case Cont(Var(c: ContVar), x) if c == param => Some(x)
     case _ => None
@@ -140,7 +130,7 @@ case class Appl(override val head: Term, override val arg: Term) extends Applica
     case Lam(x, b) => b.subst(Map(x -> arg))
     case _ =>
       val newHead = head.step
-      if !newHead.alphaEq(head) then Appl(newHead, arg) else this
+      if !(newHead eq head) && !newHead.alphaEq(head) then Appl(newHead, arg) else this
 
 case class Cont(override val head: Term, override val arg: Term) extends Application(head, arg):
   def prettyWithDepth(depth: Int) =
@@ -155,7 +145,10 @@ case class Cont(override val head: Term, override val arg: Term) extends Applica
     case _ => None
   override def step = reduction.getOrElse {
     val newHead = head.step
-    if !newHead.alphaEq(head) then Cont(newHead, arg) else this
+    if !(newHead eq head) && !newHead.alphaEq(head) then Cont(newHead, arg)
+    else
+      val newArg = arg.step
+      if !(newArg eq arg) && !newArg.alphaEq(arg) then Cont(head, newArg) else this
   }
 
 case class Thunk(override val term: Term) extends Unary(term):
