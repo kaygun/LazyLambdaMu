@@ -1,11 +1,11 @@
 ---
-title: Böhm Trees and a Lazy $\lambda$-Calculus
+title: Böhm Trees and a Lazy $\lambda\mu$-Calculus
 ---
 
 I was very happy with [my earlier implementation][1] of [Parigot's $\lambda\mu$-calculus][2],
 which by [Curry-Howard Isomorphism][3], is a model for [classical first order logic][9]. But I wanted
 to implement [recursion][4] which requires a [lazy][5] version of what I did earlier. I decided
-to use [anamorphisms][6] and self-similar trees.  [Böhm Trees][7] seemed to be the closest thing
+to use [anamorphisms][6] and self-similar trees. [Böhm Trees][7] seemed to be the closest thing
 to what I needed. So, I used them to implement a [lazy-$\lambda\mu$-calculus interpreter][8].
 
 Below, you'll find the theoretical framework I used for my implementation.
@@ -54,6 +54,31 @@ $M\ N$ becomes a binary node with children corresponding to $M$ and $N$.
 The root encodes the outermost constructor. Thus the syntax becomes a
 free magma over constructors $x, \lambda, \text{app}$.
 
+##  Parigot's $\lambda\mu$-Calculus
+
+To represent classical logic and control flow, we extend the $\lambda$-calculus to the $\lambda\mu$-calculus. This introduces a second set of variables $\mathcal{C}$ (continuation variables) and two new constructs:
+$$M ::= \dots \mid \mu\alpha. M \mid [\alpha] M$$
+where $\alpha \in \mathcal{C}$. $\mu\alpha. M$ is a $\mu$-abstraction that captures the current context, and $[\alpha] M$ is a named term that sends the result of $M$ to the continuation named $\alpha$.
+
+### Reduction Rules for Control
+The $\lambda\mu$-calculus introduces several reduction rules to handle control flow:
+1.  **Logical Rule ($\beta$):** $(\lambda x. M) N \to M[x := N]$
+2.  **Structural Rule:** $(\mu\alpha. M) N \to \mu\alpha. M[\alpha \leftarrow [\alpha](- N)]$
+3.  **Renaming Rule:** $[\beta] \mu\alpha. M \to M[\alpha := \beta]$
+4.  **Simplification:** $\mu\alpha. [\alpha] M \to M$ (if $\alpha$ is not free in $M$)
+
+In this implementation, we focus on the renaming and simplification rules to provide a mechanism for non-local escapes and classical reasoning.
+
+##  Classical Logic and Curry-Howard
+
+While the standard $\lambda$-calculus corresponds to intuitionistic logic, the $\lambda\mu$-calculus corresponds to **classical logic**. By the Curry-Howard isomorphism:
+- $\lambda$-abstraction corresponds to implication introduction ($A \to B$).
+- $\mu$-abstraction corresponds to the law of excluded middle or double-negation elimination.
+
+Specifically, the type of a $\mu$-abstraction can be seen as $\neg\neg A \to A$. This allows us to define classical tautologies like **Peirce's Law**:
+$$\text{Peirce} := \lambda f. \mu\alpha. f (\lambda x. [\alpha] x)$$
+which has the type $((A \to B) \to A) \to A$.
+
 ##  Recursion as Infinite Self-Similar Trees
 
 Recursive functions can be viewed as infinite trees or as trees
@@ -78,10 +103,10 @@ computational structure of terms independent of evaluation strategies.
 They are used in semantics to distinguish non-convertible terms and
 describe observable behaviors.
 
-##  Extending the $\lambda$-Calculus
+##  Extending the $\lambda$-Calculus with Thunks
 
-To implement lazy evaluation, we introduce two new constructs:
-$$M ::= x \mid \lambda x. M \mid M\ N \mid \theta M \mid \kappa M$$
+To implement lazy evaluation and finite representations of Böhm trees, we introduce two new constructs:
+$$M ::= \dots \mid \theta M \mid \kappa M$$
 where $\theta M$ suspends $M$, and $\kappa M$ forces the evaluation of a
 thunk. We extend the operational semantics by:
 $$\kappa(\theta M) \to M$$ This reduction allows delayed computations to
@@ -93,10 +118,6 @@ reduction rule $\kappa(\theta M) \to M$ is introduced, we may observe
 that both $\theta$ and $\kappa$ are idempotent up to operational
 equivalence:
 $$\theta(\theta M) \equiv \theta M, \quad \kappa(\kappa M) \equiv \kappa M$$
-That is, suspending a computation already suspended has no further
-effect, and forcing an already forced computation is operationally the
-same. These equations ensure stability of the delayed evaluation
-mechanism.
 
 ##  Recursion Revisited
 
@@ -111,17 +132,7 @@ $$F\ F \to \text{pair}\ 1\ (\theta(F\ F))$$ This is a weak-head normal
 form: the outermost $\text{pair}$ constructor is exposed, while the tail
 is suspended. To force evaluation of the tail, we apply $\kappa$:
 $$\kappa(\theta(F\ F)) \to F\ F \to \text{pair}\ 1\ (\theta(F\ F))$$
-Each step thus yields a new $\text{pair}\ 1\ (\theta(\cdots))$ value.
-Evaluation proceeds by recursively applying $\kappa$ to delayed tails:
-$$\text{tail}_n := \underbrace{\kappa(\theta(\cdots\kappa(\theta}_{n\text{ times}}(\text{Ones})\cdots))$$
-This results in an infinite stream of $1$'s, constructed lazily. Only
-the demanded prefix is evaluated.
-
-This formulation avoids fixed-point combinators and variable bindings,
-relying solely on thunking and self-application to produce recursive
-values. It gives a direct way to represent infinite computations with
-explicit control over evaluation, naturally aligned with the semantics
-of Böhm trees.
+This results in an infinite stream of $1$'s, constructed lazily.
 
 ##  Functional Streams and Thunked Recursion
 
@@ -135,29 +146,12 @@ $$F := \lambda x. \text{pair}\ (f(\text{head}(\kappa x)))\ (\theta(F\ (\text{tai
 and define the stream as $F\ (\theta F)$. This ensures the recursive
 call is delayed and will be evaluated only upon forcing.
 
-Attempting instead to use $F\ F$ directly would result in immediate
-recursion: the term $x\ x$ appears in a non-delayed position and is
-evaluated eagerly, leading to nontermination. In contrast, the constant
-stream $\text{Ones} = F\ F$ works because the self-reference occurs only
-inside a $\theta$ and is thus suspended.
+## Implementation Notes
 
-This example demonstrates that when recursive references appear in
-non-delayed contexts (e.g., as arguments to $f$, $\text{head}$, or
-$\text{tail}$), the self-reference must be wrapped in $\theta$. The
-thunk ensures that $\kappa$ mediates recursive forcing, providing
-fine-grained control over evaluation.
-
-As a further example, consider the lazy infinite sequence of Church
-numerals starting at zero:
-$$\text{Zero} := \lambda f. \lambda x. x \quad \text{Succ} := \lambda n. \lambda f. \lambda x. f (n f x)$$
-Define:
-$$F := \lambda x. \text{pair}\ \text{Zero}\ (\theta(\text{map}\ \text{Succ}\ (\kappa x)))$$
-Then the stream of Church numerals is given by $F\ (\theta F)$. Each
-forced tail applies the successor function to the head of the stream
-recursively, yielding:
-$$\text{pair}\ \text{Zero}\ (\theta(\text{pair}\ (\text{Succ}\ \text{Zero})\ (\theta(\cdots))))$$
-This gives a lazy list of Church numerals $0, 1, 2, \dots$ defined by
-primitive recursion over $\kappa x$.
+The interpreter implemented in this project uses a combination of **Lazy Evaluation** (via thunks) and **Full Normalization**.
+- The `eval` method performs head reduction until a stable form is reached.
+- The `normalize` method recursively descends into sub-terms to produce a fully reduced Böhm tree representation.
+- Alpha-equivalence is used to determine fixed points during evaluation, preventing infinite loops in certain circular definitions.
 
 ## References
 
@@ -166,7 +160,7 @@ primitive recursion over $\kappa x$.
 - **Church, Alonzo (1936).** *An unsolvable problem of elementary number theory.* *American Journal of Mathematics*, **58**(2), 345–363.  
 - **Curry, Haskell B. (1934).** *Functionality in combinatory logic.* *Proceedings of the National Academy of Sciences*, **20**(11), 584–590.
 
-***Böhm Trees and Denotational Semantics***
+**Böhm Trees and Denotational Semantics**
 
 - **Barendregt, Henk P. (1984).** *The Lambda Calculus: Its Syntax and Semantics.* 2nd ed., North-Holland.  
 - **Lévy, Jean-Jacques (1975).** *An algebraic interpretation of the λβK-calculus and a labelled λ-calculus.* In *LNCS 37: Lambda-Calculus and Computer Science Theory*, pp. 147–165.  
@@ -186,4 +180,3 @@ primitive recursion over $\kappa x$.
 - **Friedman, Daniel P. & Wise, David S. (1976).** *Cons should not evaluate its arguments.* In *ICALP '76*, Edinburgh University Press, pp. 257–284.  
 - **Launchbury, John (1993).** *A Natural Semantics for Lazy Evaluation.* In *POPL '93*, pp. 144–154.  
 - **Ariola, Zena M. et al. (1995).** *The Call-by-Need Lambda Calculus.* In *POPL '95*, pp. 233–246.
-
